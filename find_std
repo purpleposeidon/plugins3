@@ -1,0 +1,3 @@
+#!/bin/bash
+
+printf "%s" "$(rustc --print sysroot)/lib/libstd-*.so"

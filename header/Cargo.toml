@@ -1,0 +1,11 @@
+[package]
+name = "header"
+version = "0.1.0"
+authors = ["neptunepink <purpleposeidon@gmail.com>"]
+edition = "2018"
+
+[lib]
+path = "header.rs"
+#crate-type = ["dylib"]
+
+[dependencies]

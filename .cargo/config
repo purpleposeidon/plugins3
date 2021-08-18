@@ -1,0 +1,10 @@
+
+
+[target.x86_64-pc-windows-msvc]
+linker = "./lld-link-mine.exe"
+
+rustflags = [
+    "-C", "link-args=/LIBPATH:./msvc_x64/",
+    "-C", "link-args=/LIBPATH:./msvc_vc_lib/",
+    "-C", "link-args=/LIBPATH:./msvc_ucrt/",
+]

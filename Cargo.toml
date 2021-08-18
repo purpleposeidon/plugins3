@@ -1,6 +1,13 @@
+[profile.release]
+lto = true
+
+[profile.dev]
+lto = true
+
 [workspace]
 members = [
-    "my-master",
-    "my-plugin",
-    "my-interface"
+    "app",
+    "plugin",
+    "header",
+    "winapp",
 ]

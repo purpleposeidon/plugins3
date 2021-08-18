@@ -1,0 +1,17 @@
+[package]
+name = "app"
+version = "0.1.0"
+authors = ["neptunepink <purpleposeidon@gmail.com>"]
+edition = "2018"
+
+[[bin]]
+name = "app"
+path = "app.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+libloading = "0.7"
+header = { path = "../header", version = "*" }
+eztrace = "*"
+glob = "0.3.0"

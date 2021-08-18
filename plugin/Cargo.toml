@@ -1,0 +1,12 @@
+[package]
+name = "plugin"
+version = "0.1.0"
+authors = ["neptunepink <purpleposeidon@gmail.com>"]
+edition = "2018"
+
+[lib]
+path = "plugin.rs"
+#crate-type = ["dylib"]
+
+[dependencies]
+header = { path = "../header", version = "*" }

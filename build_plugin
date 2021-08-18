@@ -1,0 +1,13 @@
+#!/bin/bash
+
+set -xe
+
+LD=./ld.lld-12
+echo $LD
+
+#cargo rustc -p plugin -- -C embed-bitcode=no -C prefer-dynamic=yes --emit=obj
+cargo rustc -p plugin -- --emit=obj
+$LD -shared -o target/debug/libplugin.so target/debug/deps/plugin-*.o
+
+cargo rustc -p interface -- --emit=obj
+$LD -shared -o target/debug/libinterface.so target/debug/deps/interface-*.o

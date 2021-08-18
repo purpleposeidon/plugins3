@@ -1,0 +1,45 @@
+#!/bin/bash
+
+set -xe
+
+LLD_LINK=./lld-link-12.exe
+TARGET=x86_64-pc-windows-msvc
+STD=$(echo "$(rustc --print sysroot)/lib/rustlib/$TARGET/lib"/std*dll.lib)
+PLUGIN_ENTRY="new_service"
+
+# I have notes somewhere on how to obtain this, but I forgot where. It did come up in the process of cross-compiling Rust.
+#MSVC=""
+
+# for f in msvc_*/*.lib; do nm $f 2>/dev/null | grep __CxxFrameHandler3 | grep -v U && echo $f; done
+MSVCRT="./msvc_vc_lib/msvcurtd.lib" # dynamic
+# MSVCRT="./msvc_vc_lib/msvcurt.lib" # static
+# FIXME: Just have a single 'msvc' symlink; mby go through the dirs explicitly.
+
+
+function make_lib() {
+    cargo rustc --target "$TARGET" -p "$1" -- --emit=obj
+
+    "$LLD_LINK" \
+        /dll \
+        /noentry \
+        "${@:2}" \
+        "/out:target/$TARGET/debug/$1.dll" \
+        "/defaultlib:$MSVCRT" \
+        "/defaultlib:$STD" \
+        "target/$TARGET/debug/deps/$1"*.o
+}
+
+make_lib header \
+    "/export:_ZN6header5greet17hdd2049c368ec70b1E"
+# ./clang/llvm-dis target/x86_64-pc-windows-msvc/debug/deps/header-a3b31f10fc55649c.o -o=/dev/stdout | less
+# I can grep the dis for !, do some light parsing, and put it into a .def file
+# !159 = distinct !DISubprogram(name: "greet", linkageName: "_ZN6header5greet17hdd2049c368ec70b1E", scope: !161, file: !160, line: 5, type: !162, scopeLine: 5, flags: DIFlagPrototyped, spFlags: DISPFlagDefinition, unit: !3, templateParams: !66, retainedNodes: !66)
+
+
+make_lib plugin \
+    "/export:$PLUGIN_ENTRY" \
+    "/defaultlib:target/$TARGET/debug/header.lib"
+# /exports:
+
+cargo rustc --target "$TARGET" -p app
+wine ./target/x86_64-pc-windows-msvc/debug/app.exe

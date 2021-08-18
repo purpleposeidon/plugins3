@@ -1,7 +1,14 @@
-# plugin-system-example
-Example design of executable with `dylib`-based runtime plugin system in Rust, `libloading` used
+# Rust Plugins: Third Trial
 
-# Usage
+I had a [dylib demo](https://github.com/purpleposeidon/shiny-octo-memory), but it's broken lately with errors like:
 
-1. Compile plugin using `cargo build -p my-plugin`
-2. Run master by `cargo run -p my-master`
+```
+error: cannot satisfy dependencies so `std` only shows up once
+  |
+  = help: having upstream crates all available in one format will likely make this go away
+```
+
+Setting `crate-type` seems to often cause these sorts of errors; it's fragile. Too bad we have to use it for plugins, hmm?
+
+Another problem: the base crate gets all its symbols embedded into the dylibs, and they're rather bloated; even "hello world" takes a second to compile.
+It also means you can't cross-compile to Windows because the GNU linker only supports a DLL format that overflows at `u16::MAX` symbols IIRC.
