@@ -26,7 +26,7 @@ impl Pair {
         if self.host == self.target {
             format!("./target/{}", PROFILE)
         } else {
-            format!("./target/{}/{}", PROFILE, self.target)
+            format!("./target/{}/{}", self.target, PROFILE)
         }
     }
     fn libname(&self, package: &str) -> String {
@@ -36,6 +36,7 @@ impl Pair {
             e => todo!("libname {:?}", e), // This'll break if mac/bsd get added; their dylib names are the same as linux's
         }
     }
+    fn foreign(&self) -> bool { self.host != self.target }
 }
 
 #[cfg(target_os = "linux")]
@@ -58,6 +59,7 @@ struct Config {
     cmd: String,
 }
 
+#[derive(Debug)]
 struct Toolchain {
     compile: bool,
     cmds: HashMap<Config, Vec<String>>,
@@ -86,7 +88,7 @@ impl Toolchain {
             fn eat(t: Option<&str>, prefix: &str) -> String {
                 let t = t.unwrap_or_else(|| panic!("expected something starting with {:?}", prefix));
                 assert!(t.starts_with(prefix), "expected something starting with {:?}", prefix);
-                (&t[prefix.len() + 1..]).to_string()
+                (&t[prefix.len()..]).to_string()
             }
             let host = eat(host, "host:");
             let target = eat(target, "target:");
@@ -98,7 +100,7 @@ impl Toolchain {
         }
         Some(ret)
     }
-    fn get(&self, pair: Pair, cmd: &str, env: &[[&str; 2]]) -> Command {
+    fn get(&self, pair: Pair, cmd: &str, env: &[(&str, String)]) -> Command {
         let cfg = Config {
             host: pair.host.to_string(),
             target: pair.target.to_string(),
@@ -109,8 +111,8 @@ impl Toolchain {
             .unwrap_or_else(|| panic!("Command for doing {:?} not provided in toolchain.txt", cfg));
         let mut cmds: Vec<String> = cmds.clone();
         for c in &mut cmds {
-            for &[k, v] in env {
-                *c = c.replace(k, v);
+            for (k, v) in env {
+                *c = c.replace(k, &v);
             }
         }
         cmds.retain(|c| !c.is_empty());
@@ -140,8 +142,8 @@ impl Toolchain {
                 globbed.push(c.clone());
             }
         }
-        let mut cmd = Command::new(&cmds[0]);
-        cmd.args(&cmds[1..]);
+        let mut cmd = Command::new(&globbed[0]);
+        cmd.args(&globbed[1..]);
         cmd
     }
 }
@@ -168,17 +170,30 @@ fn glob1(dir: &Path, prefix: &str, suffix: &str) -> Option<PathBuf> {
     found
 }
 
-fn find_rust_std(toolchain: &Toolchain, pair: Pair) -> Option<PathBuf> {
+fn find_rust_std(toolchain: &Toolchain, pair: Pair, token_package: &str) -> Option<PathBuf> {
     let mut stdpath = toolchain.get(pair, "cargo", &[]);
     stdpath
-        .arg("--print")
-        .arg("sysroot");
+        .arg("--quiet")
+        .args(&["rustc", "-p", token_package]);
+    if pair.foreign() {
+        stdpath.arg(format!("--target={}", pair.target));
+    }
+    stdpath
+        .arg("--")
+        .args(&["--print", "sysroot"]);
     let stdpath = stdpath.output().ok()?;
     let stdpath = std::str::from_utf8(&stdpath.stdout).expect("find_rust_std parse");
     if stdpath.is_empty() { return None; }
     let stdpath = stdpath.strip_suffix('\n').expect("strip");
     let stdpath = format!("{}/lib/", stdpath);
-    let stdpath = std::path::Path::new(&stdpath);
+    let mut stdpath: PathBuf = stdpath.into();
+    if pair.foreign() {
+        // lib/rustlib/x86_64-pc-windows-msvc/lib/std-3d786a338e3fbd3c.dll.lib
+        // (Windows uses the same structure)
+        stdpath.push("rustlib");
+        stdpath.push(pair.target);
+        stdpath.push("lib");
+    }
     match pair.target {
         TRIPLE_LINUX => glob1(&stdpath, "libstd-", "so"),
         TRIPLE_WINDOWS => glob1(&stdpath, "std-", "dll"),
@@ -254,46 +269,63 @@ fn dirty(
     false
 }
 
-fn compile_dylib(toolchain: &Toolchain, pair: Pair, package: &str) -> PathBuf {
+struct Lib {
+    name: &'static str,
+    has_exports: bool,
+    dependencies: &'static [&'static str],
+}
+
+fn compile_dylib(
+    toolchain: &Toolchain,
+    pair: Pair,
+    package: Lib,
+) -> PathBuf {
+    let std = find_rust_std(toolchain, pair, package.name).expect("failed to find rust std");
+    let std = std.to_str().expect("bad utf8 in std path");
     // Assumes the command only modifies the .o files if the source hasn't changed.
     let mut cmd = toolchain.get(pair, "cargo", &[]);
     cmd.arg("rustc");
+    if pair.foreign() {
+        cmd.arg(format!("--target={}", pair.target));
+    }
     if RELEASE {
         cmd.arg("--release");
     }
-    cmd.args(["-p", package, "--", "--emit=obj"]);
+    cmd.args(["-p", package.name, "--", "--emit=obj"]);
     let start = Instant::now();
     assert!(cmd.status().unwrap().success());
 
-    let libname = pair.libname(package);
-    let objects = format!("{}/deps/{}-*.o", pair.target(), package);
+    let libname = pair.libname(package.name);
+    let objects = format!("{}/deps/{}-*.o", pair.target(), package.name);
     if !dirty(&objects, &libname) {
-        println!("  {:?}", start.elapsed());
+        println!("  {:?} (clean)", start.elapsed());
         return libname.into();
     }
     let mut env = vec![];
 
-    let std = find_rust_std(toolchain, pair).expect("failed to find std");
-    let std = std.to_str().expect("bad utf8 in std path");
     let dll_export: String;
-    if pair.target == TRIPLE_WINDOWS {
+    let target_out = pair.target();
+    if pair.target == TRIPLE_WINDOWS && package.has_exports {
         // Collect the exported symbols.
         let mut dis = toolchain.get(pair, "llvm-dis", &[
-            ["$OBJECTS", &objects],
+            ("$OBJECTS", objects.clone()),
         ]);
         dis.stdout(Stdio::piped());
         let dis = dis.spawn().expect("failed to spawn llvm-dis");
         let out = BufReader::new(dis.stdout.expect("llvm-dis stdout"));
-        dll_export = format!("{}/deps/{}.dll_export", pair.target(), package);
+        dll_export = format!("{}/deps/{}.dll_export", target_out, package.name);
         let linkage_names = File::create(dll_export.clone());
-        let linkage_names = linkage_names.expect("create dll_export");
+        let linkage_names = linkage_names
+            .unwrap_or_else(|e| panic!("create dll_export at {:?}: {}", dll_export, e));
         let mut linkage_names = BufWriter::new(linkage_names);
-        for line in out.lines() {
+        // _ZN6header3set17h7991ffbe918cc6e2E
+        let this_crate = format!("_ZN{}{}", package.name.len(), package.name);
+        'next_line: for line in out.lines() {
             // !159 = distinct !DISubprogram(name: "greet", linkageName: "_ZN6header5greet17hdd2049c368ec70b1E", scope: !161, file: !160, line: 5, type: !162, scopeLine: 5, flags: DIFlagPrototyped, spFlags: DISPFlagDefinition, unit: !3, templateParams: !66, retainedNodes: !66)
             let line = line.expect("reading output of llvm-dis failed");
             let mut line = line.split(&[' ', ':', ',', '(', ')'][..]);
             macro_rules! next {
-                () => { if let Some(l) = line.next() { l } else { continue; } };
+                () => { if let Some(l) = line.next() { l } else { continue 'next_line; } };
             }
             macro_rules! find {
                 ($t:literal) => {
@@ -303,33 +335,55 @@ fn compile_dylib(toolchain: &Toolchain, pair: Pair, package: &str) -> PathBuf {
                     }
                 };
             }
-            if !next!().starts_with('!') { continue; }
+            if !next!().starts_with('!') { continue 'next_line; }
             find!("!DISubprogram");
             find!("linkageName");
-            let linkage_name = line.next().expect("linkageName argument");
-            write!(linkage_names, "/export:{}\n\r", linkage_name).expect("write dll_export");
+            let linkage_name = line.filter(|x| !x.is_empty()).next().expect("linkageName argument");
+            let linkage_name = linkage_name.replace('"', "");
+            if !linkage_name.starts_with(&this_crate) { continue; }
+            write!(linkage_names, "/export:{}\r\n", linkage_name).expect("write dll_export");
         }
         linkage_names.flush().expect("flush linkage_names");
         {linkage_names};
-        env.push(["$EXPORTS_LIST", &dll_export]);
+        env.push(("$EXPORTS_LIST", format!("@{}", dll_export)));
+    } else if pair.target == TRIPLE_WINDOWS {
+        env.push(("$EXPORTS_LIST", String::new()));
     }
-    env.push(["$STD", std]);
-    env.push(["$OUT", &libname]);
-    env.push(["$INPUT_OBJ", &objects]);
+    let lib_out = format!("{}/{}", target_out, libname);
+    env.push(("$STD", std.into()));
+    env.push(("$OUT", lib_out.clone()));
+    env.push(("$INPUT_OBJ", objects));
+    {
+        let mut lib_deps = String::new();
+        let mut first = true;
+        for lib in package.dependencies {
+            if first {
+                first = false;
+            } else {
+                write!(lib_deps, " ").unwrap();
+            }
+            write!(lib_deps, "/defaultlib:{}/{}.lib", pair.target(), lib).unwrap();
+        }
+        env.push(("$DLL_LIB_DEPENDENCIES", lib_deps));
+    }
     let mut link = toolchain.get(pair, "link", &env[..]);
+    // $ "./lld-link-12.exe" "/dll" "/noentry" "@./target/x86_64-pc-windows-msvc/debug/deps/plugin.dll_export" "/out:./target/x86_64-pc-windows-msvc/debug/plugin.dll" "/defaultlib:./msvc_vc_lib/msvcurtd.lib" "/defaultlib:/home/poseidon/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/x86_64-pc-windows-msvc/lib/std-3d786a338e3fbd3c.dll.lib" "/defaultlib:./target/x86_64-pc-windows-msvc/debug/header.lib" "target/x86_64-pc-windows-msvc/debug/deps/plugin-ecc185708dca4430.o" 
+    // "/defaultlib:./target/x86_64-pc-windows-msvc/debug/header.lib"
+    trace!(link);
     assert!(link.status().unwrap().success(), "link failed");
-    println!("  {:?}", start.elapsed());
-    let libname: PathBuf = libname.into();
-    if package != "header" {
-        assert_clean(&libname);
+    let lib_out: PathBuf = lib_out.into();
+    if package.name != "header" {
+        assert_clean(&lib_out);
     }
-    libname
+    println!("  {:?}", start.elapsed());
+    lib_out
 }
 
 fn assert_clean(plugin: &Path) {
     let name = plugin.display();
     let mut buf = vec![];
-    let mut plugin = std::fs::File::open(plugin).unwrap();
+    let mut plugin = std::fs::File::open(plugin)
+        .unwrap_or_else(|e| panic!("unable to assert_clean() {:?}: {}", plugin, e));
     plugin.read_to_end(&mut buf).expect("read failed");
     let buf = String::from_utf8_lossy(&buf);
     let mut bad = format!("{}_{}", "forbid", "me");
@@ -358,7 +412,11 @@ fn main() {
         target: HOST,
     };
     let (std, header, plugin) = if let Some(ref toolchain) = Toolchain::load() {
-        let std = find_rust_std(toolchain, native).expect("failed to find rust std");
+        let std = find_rust_std(toolchain, native, "header").expect("failed to find rust std");
+
+        if toolchain.compile {
+            // FIXME: Copy in libstd.so, std.dll, std.dll.lib, msvrt.{lib,dll}
+        }
         let mut pairs = vec![native];
         if toolchain.compile {
             pairs.push(Pair {
@@ -374,8 +432,16 @@ fn main() {
         let mut hp = None;
         for &pair in pairs.iter().rev() {
             hp = Some((
-                compile_dylib(toolchain, pair, "header"),
-                compile_dylib(toolchain, pair, "plugin"),
+                compile_dylib(toolchain, pair, Lib {
+                    name: "header",
+                    has_exports: true,
+                    dependencies: &[],
+                }),
+                compile_dylib(toolchain, pair, Lib {
+                    name: "plugin",
+                    has_exports: false,
+                    dependencies: &["header"],
+                }),
             ));
         }
         println!("done");
@@ -407,71 +473,3 @@ fn main() {
         use_plugin(&plugin);
     }
 }
-
-/*
-#[cfg(target_os = "linux")]
-fn main() {
-    // Command::new("./build_plugin").status().ok();
-    let std = find_rust_std().expect("failed to find rust std");
-    let (header, plugin) = if let Some(toolchain) = Toolchain::load() {
-        let pair = Pair {
-            host: TRIPLE_LINUX,
-            target: if toolchain.compile {
-                TRIPLE_WINDOWS
-            } else {
-                TRIPLE_LINUX
-            },
-        };
-        println!("compiling plugins...");
-        let hp = (
-            compile_dylib(&toolchain, pair, "header"),
-            compile_dylib(&toolchain, pair, "plugin"),
-        );
-        println!("done");
-        assert_clean(&plugin);
-        if toolchain.compile { return; }
-        hp
-    } else {
-        (
-            seek_lib("header.so"),
-            seek_lib("plugin.so"),
-        )
-    };
-
-    unsafe {
-        pub use libloading::os::unix::*;
-        let _std = Library::open(Some(&std), RTLD_GLOBAL | RTLD_NOW).expect("load std");
-        let _header = Library::open(Some(header), RTLD_GLOBAL | RTLD_NOW).expect("load header");
-        let plugin = libloading::Library::new(plugin).expect("load plugin");
-        use_plugin(&plugin);
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn main() {
-    let std = None
-        .or_else(|| find_rust_std())
-        .or_else(|| seek(format!("std.dll")))
-        .or_else(|| glob1(Path::new("./"), "std-", "dll"))
-        .or_else(|| glob1(Path::new("./msvc_rust/"), "std-", "dll"))
-        .expect("unable to find std.dll");
-    let (header, plugin) = if let Some(toolchain) = Toolchain::load() {
-        assert_clean(&plugin);
-        if toolchain.compile { return; }
-        todo!()
-    } else {
-        (
-            seek_lib("header.dll").unwrap(),
-            seek_lib("plugin.dll").unwrap(),
-        )
-    };
-
-    unsafe {
-        // NOTE: If running under wine, you may need to put vcruntime140d.dll by the .exe
-        // if vcruntime isn't linked statically.
-        let _std = libloading::Library::new(&std).expect("load std.dll");
-        let _header = libloading::Library::new(header).expect("load header.dll");
-        let plugin = libloading::Library::new(plugin).expect("load plugin.dll");
-        use_plugin(&plugin);
-    }
-}*/
