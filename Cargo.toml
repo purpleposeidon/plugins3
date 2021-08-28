@@ -9,5 +9,4 @@ members = [
     "app",
     "plugin",
     "header",
-    "winapp",
 ]
