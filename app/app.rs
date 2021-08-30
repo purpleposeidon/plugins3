@@ -449,7 +449,9 @@ fn main() {
         }
         let mut hp = None;
         for &pair in pairs.iter().rev() {
-            println!("   Toolchain host {}, target {}", pair.host, pair.target);
+            if pair.foreign() {
+                println!("   Toolchain target {}", pair.target);
+            }
             hp = Some((
                 compile_dylib(toolchain, pair, Lib {
                     name: "header",
