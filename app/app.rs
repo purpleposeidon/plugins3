@@ -11,7 +11,8 @@ use std::io::{BufRead, BufReader, BufWriter, Read, Write as _};
 use std::path::*;
 use std::process::Command;
 use std::process::Stdio;
-use std::time::{Instant, SystemTime};
+use std::time::SystemTime;
+use std::cell::Cell;
 
 type Triple = &'static str;
 const TRIPLE_LINUX: Triple = "x86_64-unknown-linux-gnu";
@@ -269,6 +270,7 @@ fn dirty(
     false
 }
 
+#[derive(Debug)]
 struct Lib {
     name: &'static str,
     has_exports: bool,
@@ -292,13 +294,13 @@ fn compile_dylib(
         cmd.arg("--release");
     }
     cmd.args(["-p", package.name, "--", "--emit=obj"]);
-    let start = Instant::now();
+    //let start = Instant::now();
     assert!(cmd.status().unwrap().success());
 
     let libname = pair.libname(package.name);
     let objects = format!("{}/deps/{}-*.o", pair.target(), package.name);
     if !dirty(&objects, &libname) {
-        println!("  {:?} (clean)", start.elapsed());
+        //println!("     Elapsed {:?} (clean)", start.elapsed());
         return libname.into();
     }
     let mut env = vec![];
@@ -319,29 +321,49 @@ fn compile_dylib(
             .unwrap_or_else(|e| panic!("create dll_export at {:?}: {}", dll_export, e));
         let mut linkage_names = BufWriter::new(linkage_names);
         // _ZN6header3set17h7991ffbe918cc6e2E
-        let this_crate = format!("_ZN{}{}", package.name.len(), package.name);
-        'next_line: for line in out.lines() {
-            // !159 = distinct !DISubprogram(name: "greet", linkageName: "_ZN6header5greet17hdd2049c368ec70b1E", scope: !161, file: !160, line: 5, type: !162, scopeLine: 5, flags: DIFlagPrototyped, spFlags: DISPFlagDefinition, unit: !3, templateParams: !66, retainedNodes: !66)
+        //let this_crate = format!("_ZN{}{}", package.name.len(), package.name);
+        for line in out.lines() {
+            // ^10 = gv: (name: "_ZN6header3set17h7991ffbe918cc6e2E", summaries: (function: (module: ^0, flags: (linkage: external, notEligibleToImport: 0, live: 0,
+            // dsoLocal: 0, canAutoHide: 0), insts: 4, refs: (writeonly ^7)))) ; guid = 13118310929287874697
             let line = line.expect("reading output of llvm-dis failed");
-            let mut line = line.split(&[' ', ':', ',', '(', ')'][..]);
-            macro_rules! next {
-                () => { if let Some(l) = line.next() { l } else { continue 'next_line; } };
+            let line = line.trim();
+            if !line.starts_with("^") { continue; }
+            let delim = Cell::new('^');
+            let splitter = |c| {
+                match c {
+                    ' ' | '=' | ':' | '(' | ')' | ',' => {
+                        delim.set(c);
+                        true
+                    },
+                    _ => false,
+                }
+            };
+            let mut parsed = vec![];
+            for word in line.split(splitter) {
+                let delim = delim.get();
+                if word == "" && delim == ' ' { continue; }
+                parsed.push((delim, word));
             }
-            macro_rules! find {
-                ($t:literal) => {
-                    loop {
-                        let l = next!();
-                        if l == $t { break; }
-                    }
-                };
+            let mut iter = parsed.iter();
+            let mut found = None;
+            let mut linkage = None;
+            while let Some(&(delim, word)) = iter.next() {
+                if delim == ':' && word == "name" {
+                    let function_name = iter.next().unwrap().1;
+                    assert!(function_name.starts_with('"'));
+                    assert!(function_name.ends_with('"'));
+                    assert!(function_name.find('\\').is_none());
+                    let function_name = function_name.trim_matches('"');
+                    if found.is_some() { panic!("simple llvm parser is confused by multiple name tags"); }
+                    found = Some(function_name);
+                } else if delim == ':' && word == "linkage" {
+                    linkage = Some(iter.next().unwrap().1);
+                }
             }
-            if !next!().starts_with('!') { continue 'next_line; }
-            find!("!DISubprogram");
-            find!("linkageName");
-            let linkage_name = line.filter(|x| !x.is_empty()).next().expect("linkageName argument");
-            let linkage_name = linkage_name.replace('"', "");
-            if !linkage_name.starts_with(&this_crate) { continue; }
-            write!(linkage_names, "/export:{}\r\n", linkage_name).expect("write dll_export");
+            if let (Some(linkage_name), Some("external")) = (found, linkage) {
+                //if !linkage_name.starts_with(&this_crate) { continue; }
+                write!(linkage_names, "/export:{}\r\n", linkage_name).expect("write dll_export");
+            }
         }
         linkage_names.flush().expect("flush linkage_names");
         {linkage_names};
@@ -369,18 +391,16 @@ fn compile_dylib(
     let mut link = toolchain.get(pair, "link", &env[..]);
     // $ "./lld-link-12.exe" "/dll" "/noentry" "@./target/x86_64-pc-windows-msvc/debug/deps/plugin.dll_export" "/out:./target/x86_64-pc-windows-msvc/debug/plugin.dll" "/defaultlib:./msvc_vc_lib/msvcurtd.lib" "/defaultlib:/home/poseidon/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/x86_64-pc-windows-msvc/lib/std-3d786a338e3fbd3c.dll.lib" "/defaultlib:./target/x86_64-pc-windows-msvc/debug/header.lib" "target/x86_64-pc-windows-msvc/debug/deps/plugin-ecc185708dca4430.o" 
     // "/defaultlib:./target/x86_64-pc-windows-msvc/debug/header.lib"
-    trace!(link);
     assert!(link.status().unwrap().success(), "link failed");
     let lib_out: PathBuf = lib_out.into();
     if package.name != "header" {
         assert_clean(&lib_out);
     }
-    println!("  {:?}", start.elapsed());
+    //println!("     Elapsed {:?}", start.elapsed());
     lib_out
 }
 
 fn assert_clean(plugin: &Path) {
-    let name = plugin.display();
     let mut buf = vec![];
     let mut plugin = std::fs::File::open(plugin)
         .unwrap_or_else(|e| panic!("unable to assert_clean() {:?}: {}", plugin, e));
@@ -390,7 +410,6 @@ fn assert_clean(plugin: &Path) {
     // If "FORBID_ME" occurs in libplugin.so, the full contents are being linked in.
     bad.make_ascii_uppercase();
     assert!(!buf.contains(&bad), "libplugin.so contains the fobidden test string");
-    println!("{} looks clean.", name);
 }
 
 fn use_plugin(plugin: &libloading::Library) {
@@ -428,9 +447,9 @@ fn main() {
                 },
             });
         }
-        println!("compiling plugins...");
         let mut hp = None;
         for &pair in pairs.iter().rev() {
+            println!("   Toolchain host {}, target {}", pair.host, pair.target);
             hp = Some((
                 compile_dylib(toolchain, pair, Lib {
                     name: "header",
@@ -444,7 +463,6 @@ fn main() {
                 }),
             ));
         }
-        println!("done");
         if toolchain.compile { return; }
         let (h, p) = hp.unwrap();
         (std, h, p)
@@ -465,7 +483,7 @@ fn main() {
     }
     #[cfg(target_os = "windows")]
     unsafe {
-        // NOTE: If running under wine, you may need to put vcruntime140d.dll by the .exe
+        // NOTE: If running under wine, you may need to put vcruntime140d.dll by the .exe,
         // if vcruntime isn't linked statically.
         let _std = libloading::Library::new(&std).expect("load std.dll");
         let _header = libloading::Library::new(header).expect("load header.dll");
