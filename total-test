@@ -1,0 +1,28 @@
+#!/bin/sh
+
+set -ex
+
+# We've got to check
+# {linux, wine, windows} × {debug, release} × {no-LTO, LTO}
+# This script checks {linux, windows} × {debug, release}.
+
+# {linux, debug}
+cargo clean
+cargo run -p app
+
+# {linux, release}
+cargo clean
+cargo run -p app --release
+
+
+# {wine, debug}
+cargo clean
+cargo run -p app -- --compile
+cargo build --target x86_64-pc-windows-msvc -p app
+wine target/x86_64-pc-windows-msvc/debug/app.exe --no-compile
+
+# {wine, release}
+cargo clean
+cargo run -p app --release -- --compile
+cargo build --target x86_64-pc-windows-msvc -p app --release
+wine target/x86_64-pc-windows-msvc/release/app.exe --no-compile

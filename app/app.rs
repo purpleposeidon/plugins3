@@ -306,12 +306,14 @@ fn compile_dylib(
     if RELEASE {
         cmd.arg("--release");
     }
-    cmd.args(["-p", package.name, "--", "--emit=obj"]);
+    cmd.args(["-p", package.name]);
+    cmd.arg("--");
+    cmd.arg("--emit=llvm-bc");
     //let start = Instant::now();
     assert!(cmd.status().unwrap().success());
 
     let libname = pair.libname(package.name);
-    let objects = format!("{}/deps/{}-*.o", pair.target(), package.name);
+    let objects = format!("{}/deps/{}-*.bc", pair.target(), package.name);
     if !dirty(&objects, &libname) {
         //println!("     Elapsed {:?} (clean)", start.elapsed());
         return libname.into();
@@ -320,14 +322,15 @@ fn compile_dylib(
 
     let dll_export: String;
     let target_out = pair.target();
-    if pair.target == TRIPLE_WINDOWS && package.has_exports {
+    if pair.target == TRIPLE_WINDOWS {
         // Collect the exported symbols.
         let mut dis = toolchain.get(pair, "llvm-dis", &[
             ("$OBJECTS", objects.clone()),
         ]);
         dis.stdout(Stdio::piped());
-        let dis = dis.spawn().expect("failed to spawn llvm-dis");
-        let out = BufReader::new(dis.stdout.expect("llvm-dis stdout"));
+        let dis_cmd = format!("{:?}", dis);
+        let mut dis = dis.spawn().expect("failed to spawn llvm-dis");
+        let out = BufReader::new(dis.stdout.as_mut().expect("llvm-dis stdout"));
         dll_export = format!("{}/deps/{}.dll_export", target_out, package.name);
         let linkage_names = File::create(dll_export.clone());
         let linkage_names = linkage_names
@@ -378,11 +381,14 @@ fn compile_dylib(
                 write!(linkage_names, "/export:{}\r\n", linkage_name).expect("write dll_export");
             }
         }
+        if !dis.wait().expect("wait on llvm-dis").success() {
+            println!("aborting due to failure of llvm-dis");
+            println!("  {}", dis_cmd);
+            std::process::exit(1);
+        }
         linkage_names.flush().expect("flush linkage_names");
         {linkage_names};
         env.push(("$EXPORTS_LIST", format!("@{}", dll_export)));
-    } else if pair.target == TRIPLE_WINDOWS {
-        env.push(("$EXPORTS_LIST", String::new()));
     }
     let lib_out = format!("{}/{}", target_out, libname);
     env.push(("$STD", std.into()));
@@ -431,6 +437,7 @@ fn use_plugin(plugin: &libloading::Library) {
     assert_eq!(header::get(), 1);
     println!("Okay, that's a start!");
     type F = extern "Rust" fn() -> Box<dyn SayHelloService>;
+    trace!(plugin);
     let new_service: libloading::Symbol<F> = unsafe { plugin.get(b"new_service").expect("load symbol") };
     let service = new_service();
     service.say_hello();
@@ -500,12 +507,9 @@ fn main() {
     unsafe {
         // NOTE: If running under wine, you may need to put vcruntime140d.dll by the .exe,
         // if vcruntime isn't linked statically.
-        //let _std = libloading::Library::new(&std).expect("load std.dll");
-        //let _header = libloading::Library::new(header).expect("load header.dll");
-        //let plugin = libloading::Library::new(plugin).expect("load plugin.dll");
-        let _std = libloading::Library::new("std").expect("load std.dll");
-        let _header = libloading::Library::new("header").expect("load header.dll");
-        let plugin = libloading::Library::new("plugin").expect("load plugin.dll");
+        let _std = libloading::Library::new(&std).expect("load std.dll");
+        let _header = libloading::Library::new(header).expect("load header.dll");
+        let plugin = libloading::Library::new(plugin).expect("load plugin.dll");
         use_plugin(&plugin);
     }
 }
