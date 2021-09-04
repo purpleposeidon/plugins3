@@ -67,6 +67,9 @@ struct Toolchain {
 }
 impl Toolchain {
     fn load() -> Option<Self> {
+        if std::env::args().find(|a| a == "--no-compile").is_some() {
+            return None;
+        }
         let fd = File::open("./toolchain.txt").ok()?;
         let fd = BufReader::new(fd);
         let mut ret = Toolchain {
@@ -211,6 +214,7 @@ fn seek(path: String) -> Option<PathBuf> {
     }
 }
 
+// fn findlib
 fn seek_lib(pair: Pair, package: &str) -> Result<PathBuf, String> {
     let mut hay = String::new();
     macro_rules! seek {
@@ -228,7 +232,16 @@ fn seek_lib(pair: Pair, package: &str) -> Result<PathBuf, String> {
     seek!("./lib/{}", libname);
     seek!("./{}/lib/{}", package, libname);
     seek!("./{}", libname);
-    Err(format!("Unable to find {:?}.\nLooked in:{}\n", libname, hay))
+    Err(format!("Unable to find {:?}; searched in:{}\n", libname, hay))
+}
+fn unwrap<T>(r: Result<T, String>) -> T {
+    match r {
+        Ok(v) => v,
+        Err(m) => {
+            println!("{}", m);
+            std::process::exit(1);
+        },
+    }
 }
 
 fn modified(path: &Path) -> Option<SystemTime> {
@@ -470,9 +483,9 @@ fn main() {
         (std, h, p)
     } else {
         (
-            seek_lib(native, &native.libname("std")).unwrap(),
-            seek_lib(native, &native.libname("header")).unwrap(),
-            seek_lib(native, &native.libname("plugin")).unwrap(),
+            unwrap(seek_lib(native, "std")),
+            unwrap(seek_lib(native, "header")),
+            unwrap(seek_lib(native, "plugin")),
         )
     };
     #[cfg(target_os = "linux")]
@@ -487,9 +500,12 @@ fn main() {
     unsafe {
         // NOTE: If running under wine, you may need to put vcruntime140d.dll by the .exe,
         // if vcruntime isn't linked statically.
-        let _std = libloading::Library::new(&std).expect("load std.dll");
-        let _header = libloading::Library::new(header).expect("load header.dll");
-        let plugin = libloading::Library::new(plugin).expect("load plugin.dll");
+        //let _std = libloading::Library::new(&std).expect("load std.dll");
+        //let _header = libloading::Library::new(header).expect("load header.dll");
+        //let plugin = libloading::Library::new(plugin).expect("load plugin.dll");
+        let _std = libloading::Library::new("std").expect("load std.dll");
+        let _header = libloading::Library::new("header").expect("load header.dll");
+        let plugin = libloading::Library::new("plugin").expect("load plugin.dll");
         use_plugin(&plugin);
     }
 }

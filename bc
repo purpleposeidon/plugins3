@@ -1,0 +1,33 @@
+#!/bin/sh
+
+set -e
+
+
+compile_package() {
+    #cargo rustc -p $1 -- --emit=llvm-bc,llvm-ir
+    cargo rustc -p $1 -- --emit=llvm-bc
+}
+
+cargo clean
+
+compile_package plugin
+compile_package header
+#compile_package app
+
+#find ./target/debug/deps/ | grep .bc$
+
+#./clang/clang -o header.so -L./lrust/ -lstd-2420485b9e5ef5e1 ./target/debug/deps/header-363cee5f56294646.bc 
+
+compile_dylib() {
+    # rustup component add llvm-tools-preview-x86_64-unknown-linux-gnu
+    #rustup run stable clang -fPIC -shared -L./lrust/ -lstd-2420485b9e5ef5e1 ./target/debug/deps/$1*.bc -o ./target/debug/lib$1.so
+
+    ./clang/clang -fPIC -shared -L./lrust/ -lstd-2420485b9e5ef5e1 ./target/debug/deps/$1*.bc -o ./target/debug/lib$1.so
+}
+
+compile_dylib header
+compile_dylib plugin
+
+#./clang/clang -fPIC -shared -o header.so -L./lrust/ -lstd-2420485b9e5ef5e1 ./target/debug/deps/header-363cee5f56294646.bc
+
+cargo run -p app -- --no-compile
