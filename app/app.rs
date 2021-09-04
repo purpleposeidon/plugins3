@@ -13,6 +13,11 @@ use std::process::Command;
 use std::process::Stdio;
 use std::time::SystemTime;
 use std::cell::Cell;
+use std::io::ErrorKind;
+
+fn exit() -> ! {
+    std::process::exit(1)
+}
 
 type Triple = &'static str;
 const TRIPLE_LINUX: Triple = "x86_64-unknown-linux-gnu";
@@ -239,7 +244,7 @@ fn unwrap<T>(r: Result<T, String>) -> T {
         Ok(v) => v,
         Err(m) => {
             println!("{}", m);
-            std::process::exit(1);
+            exit()
         },
     }
 }
@@ -384,7 +389,7 @@ fn compile_dylib(
         if !dis.wait().expect("wait on llvm-dis").success() {
             println!("aborting due to failure of llvm-dis");
             println!("  {}", dis_cmd);
-            std::process::exit(1);
+            exit();
         }
         linkage_names.flush().expect("flush linkage_names");
         {linkage_names};
@@ -410,7 +415,31 @@ fn compile_dylib(
     let mut link = toolchain.get(pair, "link", &env[..]);
     // $ "./lld-link-12.exe" "/dll" "/noentry" "@./target/x86_64-pc-windows-msvc/debug/deps/plugin.dll_export" "/out:./target/x86_64-pc-windows-msvc/debug/plugin.dll" "/defaultlib:./msvc_vc_lib/msvcurtd.lib" "/defaultlib:/home/poseidon/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/x86_64-pc-windows-msvc/lib/std-3d786a338e3fbd3c.dll.lib" "/defaultlib:./target/x86_64-pc-windows-msvc/debug/header.lib" "target/x86_64-pc-windows-msvc/debug/deps/plugin-ecc185708dca4430.o" 
     // "/defaultlib:./target/x86_64-pc-windows-msvc/debug/header.lib"
-    assert!(link.status().unwrap().success(), "link failed");
+    let link_status = link.status();
+    match link_status {
+        Ok(m) => if !m.success() {
+            println!("link failed");
+            println!("  {:?}", link);
+            exit();
+        },
+        Err(e) => {
+            println!("link failed: {}", e);
+            println!("  {:?}", link);
+            if e.kind() == ErrorKind::NotFound {
+                println!();
+                println!("You need the LLVM toolchain version 12.0.1.");
+                if HOST == TRIPLE_LINUX {
+                    println!("You can use the ./grab-clang script.");
+                } else if HOST == TRIPLE_WINDOWS {
+                    println!("1. Download & run the installer from here:");
+                    println!("       https://github.com/llvm/llvm-project/releases/download/llvmorg-12.0.1/LLVM-12.0.1-win64.exe");
+                    println!("2. On the blue screen, click \"More Info\" -> Run Anyway"); // FIXME: Needs more info than this...
+                    println!("3. Click through the installer. Select \"Add LLVM to the system PATH for the current user.\"");
+                }
+            }
+            exit();
+        },
+    }
     let lib_out: PathBuf = lib_out.into();
     if package.name != "header" {
         assert_clean(&lib_out);
