@@ -3,17 +3,17 @@ extern crate glob;
 #[allow(unused_imports)] #[macro_use] extern crate eztrace;
 
 use header::SayHelloService;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Read, Write as _};
 use std::path::*;
-use std::process::Command;
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 use std::time::SystemTime;
 use std::cell::Cell;
 use std::io::ErrorKind;
+use std::time::{Instant, Duration};
 
 fn exit() -> ! {
     std::process::exit(1)
@@ -196,7 +196,7 @@ fn find_rust_std(toolchain: &Toolchain, pair: Pair, token_package: &str) -> Opti
     let stdpath = stdpath.strip_suffix('\n').expect("strip");
     let stdpath = format!("{}/lib/", stdpath);
     let mut stdpath: PathBuf = stdpath.into();
-    if pair.foreign() {
+    if pair.target == TRIPLE_WINDOWS {
         // lib/rustlib/x86_64-pc-windows-msvc/lib/std-3d786a338e3fbd3c.dll.lib
         // (Windows uses the same structure)
         stdpath.push("rustlib");
@@ -239,6 +239,131 @@ fn seek_lib(pair: Pair, package: &str) -> Result<PathBuf, String> {
     seek!("./{}", libname);
     Err(format!("Unable to find {:?}; searched in:{}\n", libname, hay))
 }
+
+fn walk(dir: &Path, each: &mut impl FnMut(&Path)) {
+    if let Ok(dir) = dir.read_dir() {
+        for entry in dir {
+            if let Ok(entry) = entry {
+                let entry = entry.path();
+                if entry.is_dir() {
+                    walk(&entry, each);
+                } else {
+                    each(&entry);
+                }
+            }
+        }
+    }
+}
+
+fn find_libcurtd() -> PathBuf {
+    let r = find_libcurtd1();
+    if !r.exists() {
+        panic!("libucrtd.lib doesn't exist at {:?}", r);
+    }
+    r
+}
+fn find_libcurtd1() -> PathBuf {
+    if let Some(e) = std::env::var_os("LIB_UCRTD") {
+        return PathBuf::from(e);
+    }
+    let ez = PathBuf::from("./libucrtd.lib");
+    if ez.exists() {
+        return ez;
+    }
+    if let Some(p) = find_libucrtd_slow() {
+        p
+    } else {
+        println!("Unable to find libucrtd.lib");
+        if HOST == TRIPLE_LINUX {
+            println!("To cross-compile from Linux to Windows, you need to download the Windows Developer Kit from");
+            println!("    https://docs.microsoft.com/en-us/legal/windows/hardware/enterprise-wdk-license-2015");
+            println!("You will need to accept their EULA.");
+            println!("You can then download the archive, where you can find");
+        } else if HOST == TRIPLE_WINDOWS {
+        }
+        println!("");
+            println!("NOTE: You can make compilation faster by copying that file into\n    {}", std::env::current_dir().unwrap().display());
+        exit()
+    }
+}
+
+fn find_libucrtd_slow() -> Option<PathBuf> {
+    let start = Instant::now();
+    let mut checked = HashSet::new();
+    let mut search_path = Vec::<String>::new();
+    search_path.push("./".into());
+    search_path.push("./wdk/Program Files".into());
+    search_path.push("./Program Files".into());
+    if HOST == TRIPLE_WINDOWS {
+        if let Ok(pf) = std::env::var("ProgramFiles") {
+            search_path.push(format!("{} (x86)", pf));
+            search_path.push(pf);
+        }
+        search_path.push("C:\\Program Files (x86)".into());
+        search_path.push("C:\\Program Files".into());
+    }
+    let mut found: Vec<([i64; 4], PathBuf)> = vec![];
+    println!("Looking for libucrtd.lib");
+    for path in &search_path {
+        if !checked.insert(path) { continue; }
+        let mut path = PathBuf::from(path);
+        path.push("Windows Kits");
+        let found = &mut found;
+        walk(&path, &mut move |p| {
+            if p.file_name() == Some(OsStr::new("libucrtd.lib")) {
+                let mut req = HashSet::new();
+                req.insert(OsStr::new("Lib"));
+                req.insert(OsStr::new("ucrt"));
+                req.insert(OsStr::new("x86"));
+                let mut version = None;
+                for c in p.components() {
+                    if let std::path::Component::Normal(c) = c {
+                        req.remove(c);
+                        let c = c.to_str().unwrap();
+                        let dots = c.chars()
+                            .filter(|&c| c == '.')
+                            .count();
+                        if dots == 3 {
+                            let mut c = c.split('.');
+                            let mut p = || c.next().unwrap().parse::<i64>().unwrap();
+                            version = Some([
+                                p(),
+                                p(),
+                                p(),
+                                p(),
+                            ]);
+                        }
+                    }
+                }
+                if req.is_empty() {
+                    if let Some(version) = version {
+                        println!("   {}", p.display());
+                        println!("      version {:?}", version);
+                        found.push((
+                            version,
+                            p.to_owned(),
+                        ));
+                    }
+                }
+            }
+        });
+    }
+    found.sort();
+    found
+        .first()
+        .map(|f| {
+            let f = f.1.clone();
+            println!("Using {}", f.display());
+            if start.elapsed() > Duration::from_millis(50) {
+                println!("NOTE: You can make compilation faster by copying that file into\n    {}", std::env::current_dir().unwrap().display());
+                println!("Or you can set the environment variable LIB_UCRTD");
+            }
+            f
+        })
+}
+
+
+
 fn unwrap<T>(r: Result<T, String>) -> T {
     match r {
         Ok(v) => v,
