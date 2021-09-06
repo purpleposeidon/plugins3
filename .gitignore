@@ -2,3 +2,6 @@
 **/*.rs.bk
 
 clang+llvm-12.0.1-x86_64-linux-gnu-ubuntu-16.04.tar.xz
+
+# Microsoft's EULA does not allow distributing this file.
+**/libucrtd.lib
