@@ -1,7 +1,7 @@
 
 
 [target.x86_64-pc-windows-msvc]
-linker = "polyglot_link.bat"
+linker = "./polyglot_link.bat"
 
 #linker = "toolchain_win\\llvm-link.exe"
 #
