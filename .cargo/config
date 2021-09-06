@@ -1,7 +1,7 @@
 
 
 [target.x86_64-pc-windows-msvc]
-linker = "./lld-link-mine.exe"
+linker = "toolchain_win\\llvm-link.exe"
 
 rustflags = [
     "-C", "link-args=/LIBPATH:./msvc_x64/",
