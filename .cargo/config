@@ -1,10 +1,12 @@
 
 
 [target.x86_64-pc-windows-msvc]
-linker = "toolchain_win\\llvm-link.exe"
+linker = "polyglot_link.bat"
 
-rustflags = [
-    "-C", "link-args=/LIBPATH:./msvc_x64/",
-    "-C", "link-args=/LIBPATH:./msvc_vc_lib/",
-    "-C", "link-args=/LIBPATH:./msvc_ucrt/",
-]
+#linker = "toolchain_win\\llvm-link.exe"
+#
+#rustflags = [
+#    "-C", "link-args=/LIBPATH:./msvc_x64/",
+#    "-C", "link-args=/LIBPATH:./msvc_vc_lib/",
+#    "-C", "link-args=/LIBPATH:./msvc_ucrt/",
+#]
