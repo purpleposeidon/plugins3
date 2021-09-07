@@ -18,6 +18,13 @@ host:x86_64-pc-windows-msvc       target:x86_64-pc-windows-msvc         cmd:link
 
 # [-windows-msvc cmd:link used to have $EXPORTS_LIST var]
 
+# x msvcurt.lib x
+# C:/Program Files (x86)/Microsoft Visual Studio 14.0/VC/lib/amd64/msvcurt.lib
+#     ^ It's this one!
+# x vcruntime.lib x
+# C:/Program Files (x86)/Microsoft Visual Studio 14.0/VC/lib/amd64/vcruntime.lib
+#     ^ Or that one! That one also is good!
+
 # ===Linux===
 # cargo rustc -p plugin -- --emit=obj
 # $LD -shared -o target/debug/libplugin.so target/debug/deps/plugin-*.o
