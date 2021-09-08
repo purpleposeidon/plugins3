@@ -1,6 +1,5 @@
 extern crate header;
 extern crate glob;
-#[allow(unused_imports)] #[macro_use] extern crate eztrace;
 
 use header::SayHelloService;
 use std::collections::{HashMap, HashSet};

@@ -13,5 +13,4 @@ path = "app.rs"
 [dependencies]
 libloading = "0.7"
 header = { path = "../header", version = "*" }
-eztrace = "*"
 glob = "0.3.0"
