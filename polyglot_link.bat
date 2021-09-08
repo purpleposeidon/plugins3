@@ -1,6 +1,6 @@
 #! /bin/sh
 
-FILTER_LINUX="" exec ./clang/lld-link /LIBPATH:./msvc_x64 /LIBPATH:./msvc_vc_lib/ /LIBPATH:./msvc_ucrt
+FILTER_LINUX="" exec ./toolchain/lld-link /LIBPATH:./msvc_x64 /LIBPATH:./msvc_vc_lib/ /LIBPATH:./msvc_ucrt
 
 link.exe %*
 
