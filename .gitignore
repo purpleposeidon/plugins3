@@ -3,6 +3,8 @@
 
 clang+llvm-12.0.1-x86_64-linux-gnu-ubuntu-16.04.tar.xz
 
-# Microsoft's EULA does not allow distributing this file.
-# Do not add it to your git repository.
+# Microsoft's EULA does not allow distributing these files.
+# Do NOT add them to your git repository.
 **/libucrtd.lib
+wdk/
+wdk
