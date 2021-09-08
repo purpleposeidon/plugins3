@@ -4,49 +4,14 @@ host:x86_64-unknown-linux-gnu     target:x86_64-pc-windows-msvc         cmd:carg
 host:x86_64-pc-windows-msvc       target:x86_64-unknown-linux-gnu       cmd:cargo      cargo
 
 
-host:x86_64-unknown-linux-gnu     target:x86_64-unknown-linux-gnu       cmd:llvm-dis   ./clang/bin/llvm-dis -o=- $OBJECTS
-host:x86_64-pc-windows-msvc       target:x86_64-pc-windows-msvc         cmd:llvm-dis   ./clang/bin/llvm-dis -o=- $OBJECTS
-host:x86_64-unknown-linux-gnu     target:x86_64-pc-windows-msvc         cmd:llvm-dis   ./clang/bin/llvm-dis -o=- $OBJECTS
-host:x86_64-pc-windows-msvc       target:x86_64-unknown-linux-gnu       cmd:llvm-dis   ./clang/bin/llvm-dis -o=- $OBJECTS
+host:x86_64-unknown-linux-gnu     target:x86_64-unknown-linux-gnu       cmd:llvm-dis   ./clang/bin/llvm-dis         -o=- $OBJECTS
+host:x86_64-unknown-linux-gnu     target:x86_64-pc-windows-msvc         cmd:llvm-dis   ./clang/bin/llvm-dis         -o=- $OBJECTS
+host:x86_64-pc-windows-msvc       target:x86_64-pc-windows-msvc         cmd:llvm-dis   ./toolchain_win/llvm-dis.exe -o=- $OBJECTS
+host:x86_64-pc-windows-msvc       target:x86_64-unknown-linux-gnu       cmd:llvm-dis   ./toolchain_win/llvm-dis.exe -o=- $OBJECTS
 
 
-# Linking! Much harder.
-host:x86_64-unknown-linux-gnu     target:x86_64-unknown-linux-gnu       cmd:link   ./clang/bin/ld.lld    -shared                       -o $OUT                                                                                   $INPUT_OBJ
-host:x86_64-pc-windows-msvc       target:x86_64-unknown-linux-gnu       cmd:link   ld.lld.exe            -shared                       -o $OUT                                                                                   $INPUT_OBJ
-host:x86_64-unknown-linux-gnu     target:x86_64-pc-windows-msvc         cmd:link   ./clang/bin/lld-link  /dll /noentry $EXPORTS_LIST /out:$OUT /defaultlib:./msvc_vc_lib/msvcurtd.lib /defaultlib:$STD.lib $DLL_LIB_DEPENDENCIES $INPUT_OBJ
-host:x86_64-pc-windows-msvc       target:x86_64-pc-windows-msvc         cmd:link   lld-link.exe          /dll /noentry $EXPORTS_LIST /out:$OUT /defaultlib:./msvc_vc_lib/msvcurtd.lib /defaultlib:$STD.lib $DLL_LIB_DEPENDENCIES $INPUT_OBJ
-
-# [-windows-msvc cmd:link used to have $EXPORTS_LIST var]
-
-# x msvcurt.lib x
-# C:/Program Files (x86)/Microsoft Visual Studio 14.0/VC/lib/amd64/msvcurt.lib
-#     ^ It's this one!
-# x vcruntime.lib x
-# C:/Program Files (x86)/Microsoft Visual Studio 14.0/VC/lib/amd64/vcruntime.lib
-#     ^ Or that one! That one also is good!
-
-# ===Linux===
-# cargo rustc -p plugin -- --emit=obj
-# $LD -shared -o target/debug/libplugin.so target/debug/deps/plugin-*.o
-# 
-# cargo rustc -p interface -- --emit=obj
-# $LD -shared -o target/debug/libinterface.so target/debug/deps/interface-*.o
-
-# ===Windows===
-# $EXPORTS_LIST
-# $OUT
-# $STD
-# $INPUT_OBJ
-#
-#    "$LLD_LINK" \
-#        /dll \
-#        /noentry \
-#        "${@:2}" \
-#        "/out:target/$TARGET/debug/$1.dll" \
-#        "/defaultlib:$MSVCRT" \
-#        "/defaultlib:$STD" \
-#        "target/$TARGET/debug/deps/$1"*.o
-
-# MSVCRT="./msvc_vc_lib/msvcurtd.lib" # dynamic
-
-# /defaultlib:./msvc_vc_lib/msvcurtd.lib
+# Linking is much harder.
+host:x86_64-unknown-linux-gnu     target:x86_64-unknown-linux-gnu       cmd:link   ./clang/bin/ld.lld    -shared                       -o $OUT                                                                  $INPUT_OBJ
+host:x86_64-pc-windows-msvc       target:x86_64-unknown-linux-gnu       cmd:link   ld.lld.exe            -shared                       -o $OUT                                                                  $INPUT_OBJ
+host:x86_64-unknown-linux-gnu     target:x86_64-pc-windows-msvc         cmd:link   ./clang/bin/lld-link  /dll /noentry $EXPORTS_LIST /out:$OUT /defaultlib:$LIBCURTD /defaultlib:$STD.lib $DLL_LIB_DEPENDENCIES $INPUT_OBJ
+host:x86_64-pc-windows-msvc       target:x86_64-pc-windows-msvc         cmd:link   lld-link.exe          /dll /noentry $EXPORTS_LIST /out:$OUT /defaultlib:$LIBCURTD /defaultlib:$STD.lib $DLL_LIB_DEPENDENCIES $INPUT_OBJ

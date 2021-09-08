@@ -196,7 +196,7 @@ fn find_rust_std(toolchain: &Toolchain, pair: Pair, token_package: &str) -> Opti
     let stdpath = stdpath.strip_suffix('\n').expect("strip");
     let stdpath = format!("{}/lib/", stdpath);
     let mut stdpath: PathBuf = stdpath.into();
-    if pair.target == TRIPLE_WINDOWS {
+    if pair.host == TRIPLE_WINDOWS || pair.target == TRIPLE_WINDOWS {
         // lib/rustlib/x86_64-pc-windows-msvc/lib/std-3d786a338e3fbd3c.dll.lib
         // (Windows uses the same structure)
         stdpath.push("rustlib");
@@ -255,39 +255,51 @@ fn walk(dir: &Path, each: &mut impl FnMut(&Path)) {
     }
 }
 
-fn find_libcurtd() -> PathBuf {
-    let r = find_libcurtd1();
-    if !r.exists() {
-        panic!("libucrtd.lib doesn't exist at {:?}", r);
+static CRT: &str = "vcruntime.lib";
+static CRT_ENV: &str = "LIB_CRT";
+static CRT_WDK_PATH: &str = "Program Files/Microsoft Visual Studio 14.0/VC/lib/amd64/vcruntime.lib";
+static WDK_URL: &str = "https://docs.microsoft.com/en-us/legal/windows/hardware/enterprise-wdk-license-2015";
+
+fn find_crt() -> PathBuf {
+    static mut FOUND: Option<PathBuf> = None;
+    let found = unsafe { FOUND.clone() };
+    if let Some(found) = found {
+        return found;
     }
+    let r = find_crt0();
+    if !r.exists() {
+        panic!("{} doesn't exist at {:?}", CRT, r);
+    }
+    unsafe { FOUND = Some(r.clone()); }
     r
 }
-fn find_libcurtd1() -> PathBuf {
-    if let Some(e) = std::env::var_os("LIB_UCRTD") {
+fn find_crt0() -> PathBuf {
+    if let Some(e) = std::env::var_os(CRT_ENV) {
         return PathBuf::from(e);
     }
-    let ez = PathBuf::from("./libucrtd.lib");
+    let ez = PathBuf::from(format!("./{}", CRT));
     if ez.exists() {
         return ez;
     }
-    if let Some(p) = find_libucrtd_slow() {
+    if let Some(p) = find_crt_slow() {
         p
     } else {
-        println!("Unable to find libucrtd.lib");
-        if HOST == TRIPLE_LINUX {
-            println!("To cross-compile from Linux to Windows, you need to download the Windows Developer Kit from");
-            println!("    https://docs.microsoft.com/en-us/legal/windows/hardware/enterprise-wdk-license-2015");
-            println!("You will need to accept their EULA.");
-            println!("You can then download the archive, where you can find");
-        } else if HOST == TRIPLE_WINDOWS {
+        println!("Unable to find {}", CRT);
+        if HOST == TRIPLE_WINDOWS {
+            println!("You must install Microsoft Visual Studio.");
+            println!("    https://visualstudio.microsoft.com/");
+            println!("This is the usual way. Or you can download the Entrprise Windows Developer Kit:");
+        } else {
+            println!("To cross-compile to Windows, you need to download the Enterprise Windows Developer Kit:");
         }
-        println!("");
-            println!("NOTE: You can make compilation faster by copying that file into\n    {}", std::env::current_dir().unwrap().display());
+        println!("    {}", WDK_URL);
+        println!("You will need to accept their EULA, which will let you download the archive.");
+        println!("From that archive, extract {:?} into this directory.", CRT_WDK_PATH);
         exit()
     }
 }
 
-fn find_libucrtd_slow() -> Option<PathBuf> {
+fn find_crt_slow() -> Option<PathBuf> {
     let start = Instant::now();
     let mut checked = HashSet::new();
     let mut search_path = Vec::<String>::new();
@@ -302,48 +314,54 @@ fn find_libucrtd_slow() -> Option<PathBuf> {
         search_path.push("C:\\Program Files (x86)".into());
         search_path.push("C:\\Program Files".into());
     }
-    let mut found: Vec<([i64; 4], PathBuf)> = vec![];
-    println!("Looking for libucrtd.lib");
+    //let mut found: Vec<([i64; 4], PathBuf)> = vec![];
+    let mut found: Vec<PathBuf> = vec![];
+    println!("Looking for {}", CRT);
     for path in &search_path {
         if !checked.insert(path) { continue; }
         let mut path = PathBuf::from(path);
-        path.push("Windows Kits");
+        //path.push("Windows Kits");
+        path.push("Microsoft Visual Studio 14.0"); // FIXME: Ugh!
         let found = &mut found;
+        let forbid: HashSet<&OsStr> = ["arm", "arm64", "onecore", "store"].iter().map(|x| OsStr::new(*x)).collect();
         walk(&path, &mut move |p| {
-            if p.file_name() == Some(OsStr::new("libucrtd.lib")) {
+            if p.file_name() == Some(OsStr::new(CRT)) {
                 let mut req = HashSet::new();
-                req.insert(OsStr::new("Lib"));
-                req.insert(OsStr::new("ucrt"));
-                req.insert(OsStr::new("x86"));
-                let mut version = None;
+                req.insert(OsStr::new("VC"));
+                req.insert(OsStr::new("lib"));
+                //req.insert(OsStr::new("Lib"));
+                //req.insert(OsStr::new("ucrt"));
+                //req.insert(OsStr::new("x64"));
+                //let mut version = None;
                 for c in p.components() {
                     if let std::path::Component::Normal(c) = c {
+                        if forbid.contains(c) { return; }
                         req.remove(c);
-                        let c = c.to_str().unwrap();
-                        let dots = c.chars()
-                            .filter(|&c| c == '.')
-                            .count();
-                        if dots == 3 {
-                            let mut c = c.split('.');
-                            let mut p = || c.next().unwrap().parse::<i64>().unwrap();
-                            version = Some([
-                                p(),
-                                p(),
-                                p(),
-                                p(),
-                            ]);
-                        }
+                        //let c = c.to_str().unwrap();
+                        //let dots = c.chars()
+                        //    .filter(|&c| c == '.')
+                        //    .count();
+                        //if dots == 3 {
+                        //    let mut c = c.split('.');
+                        //    let mut p = || c.next().unwrap().parse::<i64>().unwrap();
+                        //    version = Some([
+                        //        p(),
+                        //        p(),
+                        //        p(),
+                        //        p(),
+                        //    ]);
+                        //}
                     }
                 }
                 if req.is_empty() {
-                    if let Some(version) = version {
-                        println!("   {}", p.display());
-                        println!("      version {:?}", version);
-                        found.push((
-                            version,
-                            p.to_owned(),
-                        ));
-                    }
+                    found.push(p.to_owned());
+                    //if let Some(version) = version {
+                    //    println!("   {}", p.display());
+                    //    found.push((
+                    //        version,
+                    //        p.to_owned(),
+                    //    ));
+                    //}
                 }
             }
         });
@@ -352,7 +370,8 @@ fn find_libucrtd_slow() -> Option<PathBuf> {
     found
         .first()
         .map(|f| {
-            let f = f.1.clone();
+            let f = f.clone();
+            //let f = f.1.clone();
             println!("Using {}", f.display());
             if start.elapsed() > Duration::from_millis(50) {
                 println!("NOTE: You can make compilation faster by copying that file into\n    {}", std::env::current_dir().unwrap().display());
@@ -536,6 +555,10 @@ fn compile_dylib(
             write!(lib_deps, "/defaultlib:{}/{}.lib", pair.target(), lib).unwrap();
         }
         env.push(("$DLL_LIB_DEPENDENCIES", lib_deps));
+    }
+    if pair.target == TRIPLE_WINDOWS {
+        let lib: String = find_crt().into_os_string().into_string().unwrap();
+        env.push(("$LIBCURTD", lib));
     }
     let mut link = toolchain.get(pair, "link", &env[..]);
     // $ "./lld-link-12.exe" "/dll" "/noentry" "@./target/x86_64-pc-windows-msvc/debug/deps/plugin.dll_export" "/out:./target/x86_64-pc-windows-msvc/debug/plugin.dll" "/defaultlib:./msvc_vc_lib/msvcurtd.lib" "/defaultlib:/home/poseidon/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/x86_64-pc-windows-msvc/lib/std-3d786a338e3fbd3c.dll.lib" "/defaultlib:./target/x86_64-pc-windows-msvc/debug/header.lib" "target/x86_64-pc-windows-msvc/debug/deps/plugin-ecc185708dca4430.o" 
