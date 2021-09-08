@@ -256,7 +256,7 @@ fn walk(dir: &Path, each: &mut impl FnMut(&Path)) {
 
 static CRT: &str = "vcruntime.lib";
 static CRT_ENV: &str = "LIB_CRT";
-static CRT_WDK_PATH: &str = "Program Files/Microsoft Visual Studio 14.0/VC/lib/amd64/vcruntime.lib";
+//static CRT_WDK_PATH: &str = "Program Files/Microsoft Visual Studio 14.0/VC/lib/amd64/vcruntime.lib";
 static WDK_URL: &str = "https://docs.microsoft.com/en-us/legal/windows/hardware/enterprise-wdk-license-2015";
 
 fn find_crt() -> PathBuf {
@@ -287,13 +287,14 @@ fn find_crt0() -> PathBuf {
         if HOST == TRIPLE_WINDOWS {
             println!("You must install Microsoft Visual Studio.");
             println!("    https://visualstudio.microsoft.com/");
-            println!("This is the usual way. Or you can download the Entrprise Windows Developer Kit:");
+            println!("This is the usual way. Or you can download the Enterprise Windows Developer Kit:");
         } else {
             println!("To cross-compile to Windows, you need to download the Enterprise Windows Developer Kit:");
         }
         println!("    {}", WDK_URL);
         println!("You will need to accept their EULA, which will let you download the archive.");
-        println!("From that archive, extract {:?} into this directory.", CRT_WDK_PATH);
+        println!("In the same directory as 'polyglot_link.bat', create a folder 'wdk', and extract the archive into it,");
+        println!("so that there is a 'wdk/Program Files/' directory.");
         exit()
     }
 }
