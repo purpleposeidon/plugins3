@@ -11,4 +11,3 @@ error: cannot satisfy dependencies so `std` only shows up once
 Setting `crate-type` seems to often cause these sorts of errors; it's fragile. Too bad we have to use it for plugins, hmm?
 
 Another problem: the base crate gets all its symbols embedded into the dylibs, and they're rather bloated; even "hello world" takes a second to compile.
-It also means you can't cross-compile to Windows because the GNU linker only supports a DLL format that overflows at `u16::MAX` symbols IIRC.
