@@ -211,12 +211,12 @@ fn find_rust_std(toolchain: &Toolchain, pair: Pair, token_package: &str) -> Opti
 }
 
 fn seek(path: String) -> Option<PathBuf> {
-    let pb: PathBuf = path.into();
-    if pb.exists() {
-        Some(pb)
-    } else {
-        None
+    let mut it = glob::glob(&path).unwrap();
+    let f = it.next();
+    if let Some(g) = it.next() {
+        panic!("{:?} matched multiple files, including {:?} and {:?}", path, f, g);
     }
+    f.map(Result::unwrap)
 }
 
 // fn findlib
@@ -670,8 +670,14 @@ fn main() {
         let (h, p) = hp.unwrap();
         (std, h, p)
     } else {
+        // libstd has a hash appended. I'd rather it didn't, but the plugins refer to it by
+        // name with the hash. This code to find it could be a problem if there are multiple
+        // libstds -- it's very imaginable that an update process fails to delete the old one.
+        // What we could do is we could open up each of the libraries in turn, scanning for
+        // something matching /std-[a-zA-Z0-9]\{16}\.dll/. It is possible that it is included as a
+        // string, but I think we could stand to ignore that possibility.
         (
-            unwrap(seek_lib(native, "std")),
+            unwrap(seek_lib(native, "std*")),
             unwrap(seek_lib(native, "header")),
             unwrap(seek_lib(native, "plugin")),
         )
