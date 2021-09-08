@@ -355,6 +355,7 @@ fn find_crt_slow() -> Option<PathBuf> {
                 }
                 if req.is_empty() {
                     found.push(p.to_owned());
+                    println!("   {}", p.display());
                     //if let Some(version) = version {
                     //    println!("   {}", p.display());
                     //    found.push((
