@@ -612,20 +612,6 @@ fn assert_clean(plugin: &Path) {
     assert!(!buf.contains(&bad), "libplugin.so contains the fobidden test string");
 }
 
-fn use_plugin(plugin: &libloading::Library) {
-    assert_eq!(header::get(), 0);
-    header::set(1);
-    assert_eq!(header::get(), 1);
-    println!("Okay, that's a start!");
-    type F = extern "Rust" fn() -> Box<dyn SayHelloService>;
-    trace!(plugin);
-    let new_service: libloading::Symbol<F> = unsafe { plugin.get(b"new_service").expect("load symbol") };
-    let service = new_service();
-    service.say_hello();
-    /*assert_eq!(header::get(), 2);*/
-    println!("Hooray!");
-}
-
 fn main() {
     let native = Pair {
         host: HOST,
@@ -682,11 +668,19 @@ fn main() {
             unwrap(seek_lib(native, "plugin")),
         )
     };
+    my_guy();
     #[cfg(target_os = "linux")]
     unsafe {
         pub use libloading::os::unix::*;
+        // FIXME: RTLD_GLOBAL: What if a library overrides the symbol of another?
+        // There's RTLD_DEEPBIND in libc, but it's not exposed here.
+        // The documentation isn't clear on what that means. Does it mean it can override other
+        // library's symbols? The name implies that. Does it mean that its own symbols take
+        // priority, and its symbols don't override others? The name implies this as well.
         let _std = Library::open(Some(&std), RTLD_GLOBAL | RTLD_NOW).expect("load std");
+        my_guy();
         let _header = Library::open(Some(header), RTLD_GLOBAL | RTLD_NOW).expect("load header");
+        my_guy();
         let plugin = libloading::Library::new(plugin).expect("load plugin");
         use_plugin(&plugin);
     }
@@ -695,8 +689,30 @@ fn main() {
         // NOTE: If running under wine, you may need to put vcruntime140d.dll by the .exe,
         // if vcruntime isn't linked statically.
         let _std = libloading::Library::new(&std).expect("load std.dll");
+        my_guy();
         let _header = libloading::Library::new(header).expect("load header.dll");
+        my_guy();
         let plugin = libloading::Library::new(plugin).expect("load plugin.dll");
+        my_guy();
         use_plugin(&plugin);
     }
+    my_guy();
+}
+
+fn use_plugin(plugin: &libloading::Library) {
+    println!("plugin: {:?}", plugin);
+    assert_eq!(header::get(), 0);
+    header::set(1);
+    assert_eq!(header::get(), 1);
+    type F = extern "Rust" fn() -> Box<dyn SayHelloService>;
+    let new_service: libloading::Symbol<F> = unsafe { plugin.get(b"new_service").expect("load symbol") };
+    let service = new_service();
+    service.say_hello();
+    /*assert_eq!(header::get(), 2);*/
+    println!("Hooray!");
+}
+
+#[no_mangle]
+fn my_guy() {
+    // plugin.rs' panics
 }
