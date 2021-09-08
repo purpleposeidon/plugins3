@@ -457,6 +457,9 @@ fn compile_dylib(
         cmd.arg("--release");
     }
     cmd.args(["-p", package.name]);
+    if std::env::args().find(|a| a == "--verbose").is_some() {
+        cmd.arg("--verbose");
+    }
     cmd.arg("--");
     cmd.arg("--emit=llvm-bc");
     //let start = Instant::now();
