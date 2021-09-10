@@ -1,0 +1,13 @@
+#!/bin/sh
+
+set -ex
+
+cargo clean
+
+for n in seq 0 10
+do
+    cargo rustc -p header -- --emit=llvm-bc
+    cargo rustc -p plugin -- --emit=llvm-bc
+done
+
+echo "It worked!"
